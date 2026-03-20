@@ -5,7 +5,7 @@ from .models import Project, Task
 
 class TaskSerializer(serializers.ModelSerializer):
     is_overdue = serializers.ReadOnlyField()
-    deadline   = serializers.CharField(
+    deadline = serializers.CharField(
         required=False,
         allow_blank=True,
         allow_null=True,
@@ -14,7 +14,7 @@ class TaskSerializer(serializers.ModelSerializer):
     )
 
     class Meta:
-        model  = Task
+        model = Task
         fields = [
             'id', 'project', 'title', 'description',
             'priority', 'status', 'deadline',
@@ -65,5 +65,5 @@ class ProjectSerializer(serializers.ModelSerializer):
     tasks = TaskSerializer(many=True, read_only=True)
 
     class Meta:
-        model  = Project
+        model = Project
         fields = ['id', 'name', 'description', 'tasks', 'created_at', 'updated_at']

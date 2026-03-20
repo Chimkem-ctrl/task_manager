@@ -8,11 +8,11 @@ import {
 import ProjectForm from './ProjectForm';
 
 export default function ProjectList() {
-  const [projects, setProjects]       = useState([]);
-  const [loading, setLoading]         = useState(true);
-  const [showForm, setShowForm]       = useState(false);
-  const [editingProject, setEditing]  = useState(null);
-  const [error, setError]             = useState('');
+  const [projects, setProjects] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [showForm, setShowForm] = useState(false);
+  const [editingProject, setEditing] = useState(null);
+  const [error, setError] = useState('');
 
   const fetchProjects = async () => {
     try {

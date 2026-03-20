@@ -1,9 +1,9 @@
 import { useState, useEffect } from 'react';
 
 export default function ProjectForm({ onSubmit, onCancel, initial }) {
-  const [name, setName]           = useState('');
+  const [name, setName] = useState('');
   const [description, setDescription] = useState('');
-  const [error, setError]         = useState('');
+  const [error, setError] = useState('');
 
   useEffect(() => {
     if (initial) {

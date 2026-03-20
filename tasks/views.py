@@ -21,20 +21,20 @@ class SafeBrowsableAPIRenderer(renderers.BrowsableAPIRenderer):
 
 
 class ProjectViewSet(viewsets.ModelViewSet):
-    queryset           = Project.objects.all().order_by('-created_at')
-    serializer_class   = ProjectSerializer
-    renderer_classes   = [renderers.JSONRenderer, SafeBrowsableAPIRenderer]
+    queryset = Project.objects.all().order_by('-created_at')
+    serializer_class = ProjectSerializer
+    renderer_classes = [renderers.JSONRenderer, SafeBrowsableAPIRenderer]
 
 
 class TaskViewSet(viewsets.ModelViewSet):
-    queryset           = Task.objects.all().order_by('deadline', '-priority')
-    serializer_class   = TaskSerializer
-    renderer_classes   = [renderers.JSONRenderer, SafeBrowsableAPIRenderer]
-    filter_backends    = [DjangoFilterBackend, filters.OrderingFilter,
-                          filters.SearchFilter]
-    filterset_fields   = ['status', 'priority', 'project']
-    search_fields      = ['title', 'description']
-    ordering_fields    = ['deadline', 'priority', 'created_at']
+    queryset = Task.objects.all().order_by('deadline', '-priority')
+    serializer_class = TaskSerializer
+    renderer_classes = [renderers.JSONRenderer, SafeBrowsableAPIRenderer]
+    filter_backends = [DjangoFilterBackend, filters.OrderingFilter,
+                       filters.SearchFilter]
+    filterset_fields = ['status', 'priority', 'project']
+    search_fields = ['title', 'description']
+    ordering_fields = ['deadline', 'priority', 'created_at']
 
     @action(detail=False, methods=['get'], url_path='overdue')
     def overdue(self, request):
