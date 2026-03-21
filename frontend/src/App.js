@@ -9,8 +9,16 @@ async function request(path, options = {}) {
     ...options,
   });
   if (!res.ok) {
-    const err = await res.json().catch(() => ({}));
-    throw new Error(JSON.stringify(err));
+    const raw = await res.text();
+    console.error(`[API ${res.status}] ${options.method || "GET"} ${path}`, raw);
+    // Try to parse as JSON, fall back to raw text
+    try {
+      const err = JSON.parse(raw);
+      throw new Error(JSON.stringify(err));
+    } catch (parseErr) {
+      if (parseErr.message.startsWith("{")) throw parseErr; // already our error
+      throw new Error(raw || `HTTP ${res.status}`);
+    }
   }
   if (res.status === 204) return null;
   return res.json();
@@ -24,8 +32,14 @@ const api = {
     update: (id, data) => request(`/projects/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id) => request(`/projects/${id}/`, { method: "DELETE" }),
     tasks: (id, params = {}) => {
-      const q = new URLSearchParams(params).toString();
-      return request(`/projects/${id}/tasks/${q ? "?" + q : ""}`);
+      // Use dedicated overdue endpoint if overdue filter active
+      if (params.overdue === "true") {
+        delete params.overdue;
+        const q = new URLSearchParams({ project: id, ...params }).toString();
+        return request(`/tasks/overdue/?${q}`).then(res => res.tasks || res);
+      }
+      const q = new URLSearchParams({ project: id, ...params }).toString();
+      return request(`/tasks/?${q}`);
     },
   },
   tasks: {
@@ -47,6 +61,7 @@ const STATUS_CONFIG = {
   todo:        { label: "To Do",       color: "#8b8fa8" },
   in_progress: { label: "In Progress", color: "#5b9cf6" },
   done:        { label: "Done",        color: "#4cc9a4" },
+  cancelled:   { label: "Cancelled",   color: "#d9534f" },
 };
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -148,8 +163,7 @@ const styles = `
   .deadline-badge { font-size: 11px; font-family: var(--mono); color: var(--muted); display: flex; align-items: center; gap: 4px; }
   .deadline-badge.overdue { color: var(--danger); }
   .status-badge { font-size: 11px; font-family: var(--mono); padding: 2px 8px; border-radius: 4px; }
-  .task-actions { display: flex; gap: 6px; opacity: 0; transition: var(--transition); }
-  .task-card:hover .task-actions { opacity: 1; }
+  .task-actions { display: flex; gap: 6px; flex-shrink: 0; }
 
   /* BUTTONS */
   .btn { padding: 8px 16px; border-radius: 8px; border: 1px solid var(--border); background: var(--surface2); color: var(--text); font-family: var(--font); font-size: 12px; font-weight: 600; cursor: pointer; transition: var(--transition); display: flex; align-items: center; gap: 6px; letter-spacing: 0.02em; }
@@ -198,9 +212,17 @@ const styles = `
   .field-row .field { flex: 1; }
   .error-text { font-size: 11px; color: var(--danger); font-family: var(--mono); }
 
-  /* STATUS CYCLE */
-  .status-cycle { cursor: pointer; transition: var(--transition); }
-  .status-cycle:hover { opacity: 0.7; }
+  /* STATUS SWITCHER */
+  .status-switcher { display: flex; gap: 6px; margin-top: 12px; padding-top: 12px; border-top: 1px solid var(--border); }
+  .status-btn { display: flex; align-items: center; gap: 6px; padding: 5px 12px; border-radius: 20px; border: 1px solid var(--border); background: transparent; color: var(--muted); font-family: var(--font); font-size: 11px; font-weight: 500; cursor: pointer; transition: var(--transition); letter-spacing: 0.02em; white-space: nowrap; }
+  .status-btn:not(:disabled):hover { border-color: rgba(255,255,255,0.2); color: var(--text); background: var(--surface2); }
+  .status-btn.active { font-weight: 700; cursor: default; }
+  .status-btn:disabled:not(.active) { opacity: 0.4; cursor: not-allowed; }
+  .status-dot { width: 6px; height: 6px; border-radius: 50%; flex-shrink: 0; }
+
+  /* TASK CARD HEADER ROW */
+  .task-card-header-row { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; margin-bottom: 4px; }
+  .task-card.updating { opacity: 0.7; pointer-events: none; }
 
   /* ANIMATIONS */
   @keyframes fadeIn { from { opacity: 0; } to { opacity: 1; } }
@@ -309,9 +331,19 @@ function TaskModal({ task, projectId, onClose, onSave }) {
         : await api.tasks.create(payload);
       onSave(result);
     } catch (e) {
-      const msg = e.message || "";
-      if (msg.includes("past")) setError("Deadline cannot be in the past.");
-      else setError("Failed to save task. Please check your inputs.");
+      const raw = e.message || "";
+      try {
+        const parsed = JSON.parse(raw);
+        const messages = Object.entries(parsed)
+          .flatMap(([field, errs]) => {
+            const label = field === "non_field_errors" ? "" : field + ": ";
+            return (Array.isArray(errs) ? errs : [errs]).map((m) => label + m);
+          });
+        setError(messages.join(" · ") || "Failed to save task.");
+      } catch {
+        // Non-JSON error — show raw message (e.g. Django 500, CORS, network)
+        setError(raw.length < 200 ? raw : "Server error — check Django console for details.");
+      }
     } finally {
       setLoading(false);
     }
@@ -358,6 +390,7 @@ function TaskModal({ task, projectId, onClose, onSave }) {
                 <option value="todo">To Do</option>
                 <option value="in_progress">In Progress</option>
                 <option value="done">Done</option>
+                <option value="cancelled">Cancelled</option>
               </select>
             </div>
           </div>
@@ -404,55 +437,35 @@ function ConfirmModal({ title, message, onConfirm, onClose }) {
 }
 
 // ─── TASK CARD ────────────────────────────────────────────────────────────────
-function TaskCard({ task, onEdit, onDelete, onStatusChange }) {
+function TaskCard({ task, onEdit, onDelete }) {
   const priority = PRIORITY_CONFIG[task.priority];
-  const statusCfg = STATUS_CONFIG[task.status];
-  const cycleStatus = () => {
-    const order = ["todo", "in_progress", "done"];
-    const next = order[(order.indexOf(task.status) + 1) % order.length];
-    onStatusChange(task.id, next);
-  };
 
   return (
     <div className={`task-card ${task.is_overdue ? "overdue" : ""}`}>
       <div className="task-card-top">
-        <div
-          className={`task-check ${task.status}`}
-          onClick={cycleStatus}
-          title={`Status: ${statusCfg.label} — click to cycle`}
-        >
-          {task.status === "done" && <span style={{ color: "white", fontSize: 10 }}>✓</span>}
-          {task.status === "in_progress" && <span style={{ color: "var(--accent)", fontSize: 8 }}>●</span>}
-        </div>
         <div className="task-card-body">
-          <div className={`task-title ${task.status}`}>{task.title}</div>
+          <div className="task-card-header-row">
+            <div className={`task-title ${task.status === "done" ? "done" : ""}`}>{task.title}</div>
+            <div className="task-actions">
+              <button className="btn btn-icon btn-sm" onClick={() => onEdit(task)} title="Edit task">✎</button>
+              <button className="btn btn-icon btn-sm btn-danger" onClick={() => onDelete(task)} title="Delete task">✕</button>
+            </div>
+          </div>
           {task.description && <div className="task-desc">{task.description}</div>}
           <div className="task-meta">
-            <span
-              className="priority-badge"
-              style={{ color: priority.color, background: priority.bg }}
-            >
+            <span className="priority-badge" style={{ color: priority.color, background: priority.bg }}>
               {priority.label}
             </span>
-            <span
-              className="status-badge status-cycle"
-              style={{ color: statusCfg.color, background: `${statusCfg.color}18`, cursor: "pointer" }}
-              onClick={cycleStatus}
-              title="Click to cycle status"
-            >
-              {statusCfg.label}
+            <span className="status-badge" style={{ color: STATUS_CONFIG[task.status].color, background: `${STATUS_CONFIG[task.status].color}18` }}>
+              {STATUS_CONFIG[task.status].label}
             </span>
             {task.deadline && (
               <span className={`deadline-badge ${task.is_overdue ? "overdue" : ""}`}>
-                {task.is_overdue ? "⚠ " : "⏱ "}
-                {task.is_overdue ? "Overdue · " : ""}{formatDeadline(task.deadline)}
+                {task.is_overdue ? "⚠ Overdue · " : "⏱ "}{formatDeadline(task.deadline)}
               </span>
             )}
           </div>
-        </div>
-        <div className="task-actions">
-          <button className="btn btn-icon btn-sm" onClick={() => onEdit(task)} title="Edit task">✎</button>
-          <button className="btn btn-icon btn-sm btn-danger" onClick={() => onDelete(task)} title="Delete task">✕</button>
+
         </div>
       </div>
     </div>
@@ -467,16 +480,22 @@ function ProjectView({ project, onProjectEdit, onProjectDelete }) {
   const [modal, setModal] = useState(null); // null | 'newTask' | 'editTask' | 'deleteTask'
   const [selectedTask, setSelectedTask] = useState(null);
 
+  const [fetchError, setFetchError] = useState("");
+
   const fetchTasks = useCallback(async () => {
     setLoading(true);
+    setFetchError("");
     try {
       const params = {};
       if (filters.priority) params.priority = filters.priority;
       if (filters.status) params.status = filters.status;
       if (filters.overdue) params.overdue = "true";
       const data = await api.projects.tasks(project.id, params);
-      setTasks(data);
+      console.log("[fetchTasks] response:", data);
+      setTasks(Array.isArray(data) ? data : []);
     } catch (e) {
+      console.error("[fetchTasks] error:", e);
+      setFetchError(e.message || "Failed to load tasks.");
       setTasks([]);
     } finally {
       setLoading(false);
@@ -587,6 +606,11 @@ function ProjectView({ project, onProjectEdit, onProjectDelete }) {
 
       {/* Tasks */}
       <div className="tasks-area">
+        {fetchError && (
+          <div style={{ margin: "0 0 16px", padding: "12px 16px", background: "rgba(255,59,92,0.1)", border: "1px solid rgba(255,59,92,0.3)", borderRadius: 8, fontSize: 12, color: "var(--danger)", fontFamily: "var(--mono)" }}>
+            ⚠ Failed to load tasks: {fetchError}
+          </div>
+        )}
         {loading ? (
           <div className="loading"><div className="spinner" />Loading tasks…</div>
         ) : tasks.length === 0 ? (
@@ -607,7 +631,6 @@ function ProjectView({ project, onProjectEdit, onProjectDelete }) {
                 task={task}
                 onEdit={(t) => { setSelectedTask(t); setModal("editTask"); }}
                 onDelete={(t) => { setSelectedTask(t); setModal("deleteTask"); }}
-                onStatusChange={handleStatusChange}
               />
             ))}
           </div>

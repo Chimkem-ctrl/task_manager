@@ -15,16 +15,16 @@ class Project(models.Model):
 class Task(models.Model):
 
     class Priority(models.TextChoices):
-        LOW = 'LOW', 'Low'
-        MEDIUM = 'MEDIUM', 'Medium'
-        HIGH = 'HIGH', 'High'
-        URGENT = 'URGENT', 'Urgent'
+        LOW = 'low', 'Low'
+        MEDIUM = 'medium', 'Medium'
+        HIGH = 'high', 'High'
+        CRITICAL = 'critical', 'Critical'
 
     class Status(models.TextChoices):
-        TODO = 'TODO', 'To Do'
-        IN_PROGRESS = 'IN_PROGRESS', 'In Progress'
-        DONE = 'DONE', 'Done'
-        CANCELLED = 'CANCELLED', 'Cancelled'
+        TODO = 'todo', 'To Do'
+        IN_PROGRESS = 'in_progress', 'In Progress'
+        DONE = 'done', 'Done'
+        CANCELLED = 'cancelled', 'Cancelled'
 
     project = models.ForeignKey(
         Project,
@@ -51,7 +51,7 @@ class Task(models.Model):
     def is_overdue(self):
         """Automatically returns True if deadline passed and task is not done."""
         if self.deadline and self.status not in [
-            self.Status.DONE, self.Status.CANCELLED
+            self.Status.DONE, 'done', self.Status.CANCELLED, 'cancelled'
         ]:
             return timezone.now() > self.deadline
         return False

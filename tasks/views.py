@@ -41,7 +41,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         qs = Task.objects.filter(
             deadline__lt=timezone.now()
         ).exclude(
-            status__in=[Task.Status.DONE, Task.Status.CANCELLED]
+            status__in=['done', 'cancelled']
         ).order_by('deadline')
         serializer = self.get_serializer(qs, many=True)
         return Response({'count': qs.count(), 'results': serializer.data})
