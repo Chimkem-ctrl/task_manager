@@ -25,6 +25,30 @@ class ProjectViewSet(viewsets.ModelViewSet):
     serializer_class = ProjectSerializer
     renderer_classes = [renderers.JSONRenderer, SafeBrowsableAPIRenderer]
 
+    @action(detail=True, methods=['get'], url_path='tasks')
+    def tasks(self, request, pk=None):
+        project = self.get_object()
+        qs = project.tasks.all()
+
+        status = request.query_params.get('status')
+        priority = request.query_params.get('priority')
+        overdue = request.query_params.get('overdue')
+        ordering = request.query_params.get('ordering')
+
+        if status:
+            qs = qs.filter(status=status)
+        if priority:
+            qs = qs.filter(priority=priority)
+        if overdue and overdue.lower() in ['true', '1', 'yes']:
+            qs = qs.filter(deadline__lt=timezone.now()).exclude(
+                status__in=[Task.Status.DONE, Task.Status.CANCELLED]
+            )
+        if ordering:
+            qs = qs.order_by(ordering)
+
+        serializer = TaskSerializer(qs, many=True)
+        return Response({'count': qs.count(), 'results': serializer.data})
+
 
 class TaskViewSet(viewsets.ModelViewSet):
     queryset = Task.objects.all().order_by('deadline', '-priority')
