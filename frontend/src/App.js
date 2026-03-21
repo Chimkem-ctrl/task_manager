@@ -46,6 +46,10 @@ const api = {
     create: (data) => request("/tasks/", { method: "POST", body: JSON.stringify(data) }),
     update: (id, data) => request(`/tasks/${id}/`, { method: "PATCH", body: JSON.stringify(data) }),
     delete: (id) => request(`/tasks/${id}/`, { method: "DELETE" }),
+    overdue: (params = {}) => {
+      const q = new URLSearchParams(params).toString();
+      return request(`/tasks/overdue/${q ? `?${q}` : ""}`).then(res => res.tasks || res);
+    },
   },
 };
 
@@ -473,10 +477,10 @@ function TaskCard({ task, onEdit, onDelete }) {
 }
 
 // ─── PROJECT VIEW ─────────────────────────────────────────────────────────────
-function ProjectView({ project, onProjectEdit, onProjectDelete }) {
+function ProjectView({ project, onProjectEdit, onProjectDelete, onSwitchToOverdue }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ priority: "", status: "", overdue: "" });
+  const [filters, setFilters] = useState({ priority: "", status: "" });
   const [modal, setModal] = useState(null); // null | 'newTask' | 'editTask' | 'deleteTask'
   const [selectedTask, setSelectedTask] = useState(null);
 
@@ -489,7 +493,6 @@ function ProjectView({ project, onProjectEdit, onProjectDelete }) {
       const params = {};
       if (filters.priority) params.priority = filters.priority;
       if (filters.status) params.status = filters.status;
-      if (filters.overdue) params.overdue = "true";
       const data = await api.projects.tasks(project.id, params);
       console.log("[fetchTasks] response:", data);
       setTasks(Array.isArray(data) ? data : []);
@@ -596,9 +599,9 @@ function ProjectView({ project, onProjectEdit, onProjectDelete }) {
         ))}
         <div className="filter-sep" />
         <button
-          className={`filter-chip ${filters.overdue ? "active" : ""}`}
-          onClick={() => toggleFilter("overdue", "true")}
-          style={filters.overdue ? { borderColor: "var(--danger)", color: "var(--danger)", background: "rgba(255,59,92,0.1)" } : {}}
+          className="filter-chip"
+          onClick={() => onSwitchToOverdue()}
+          style={{ borderColor: "var(--danger)", color: "var(--danger)", background: "rgba(255,59,92,0.1)" }}
         >
           ⚠ Overdue only
         </button>
@@ -665,10 +668,133 @@ function ProjectView({ project, onProjectEdit, onProjectDelete }) {
   );
 }
 
+function OverdueView() {
+  const [tasks, setTasks] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState("");
+  const [modal, setModal] = useState(null); // 'editTask' | 'deleteTask'
+  const [selectedTask, setSelectedTask] = useState(null);
+
+  const fetchTasks = useCallback(async () => {
+    setLoading(true);
+    setFetchError("");
+    try {
+      const data = await api.tasks.overdue();
+      setTasks(Array.isArray(data) ? data : data.results || []);
+    } catch (e) {
+      console.error("[OverdueView] fetch error", e);
+      setFetchError(e.message || "Failed to load tasks.");
+      setTasks([]);
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchTasks(); }, [fetchTasks]);
+
+  const handleTaskSave = () => {
+    setModal(null);
+    setSelectedTask(null);
+    fetchTasks();
+  };
+
+  const handleTaskDelete = async () => {
+    try {
+      await api.tasks.delete(selectedTask.id);
+      setModal(null);
+      setSelectedTask(null);
+      fetchTasks();
+    } catch (e) {
+      console.error("[OverdueView] delete failed", e);
+    }
+  };
+
+  const total = tasks.length;
+  const done = tasks.filter((t) => t.status === "done").length;
+  const inProgress = tasks.filter((t) => t.status === "in_progress").length;
+  const overdueCount = tasks.filter((t) => t.is_overdue).length;
+
+  return (
+    <>
+      <div className="main-header">
+        <div>
+          <div className="main-title">Overdue Tasks</div>
+          <div className="main-desc">All overdue tasks across all projects.</div>
+        </div>
+      </div>
+
+      <div className="stats-row">
+        <div className="stat-card">
+          <div className="stat-num">{total}</div>
+          <div className="stat-label">Total Overdue</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-num" style={{ color: "var(--accent)" }}>{inProgress}</div>
+          <div className="stat-label">In Progress</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-num" style={{ color: "var(--success)" }}>{done}</div>
+          <div className="stat-label">Completed</div>
+        </div>
+        <div className="stat-card">
+          <div className="stat-num" style={{ color: overdueCount > 0 ? "var(--danger)" : "var(--muted)" }}>{overdueCount}</div>
+          <div className="stat-label">Still Overdue</div>
+        </div>
+      </div>
+
+      <div className="tasks-area">
+        {fetchError ? (
+          <div style={{ margin: "0 0 16px", padding: "12px 16px", background: "rgba(255,59,92,0.1)", border: "1px solid rgba(255,59,92,0.3)", borderRadius: 8, fontSize: 12, color: "var(--danger)", fontFamily: "var(--mono)" }}>
+            ⚠ Failed to load tasks: {fetchError}
+          </div>
+        ) : loading ? (
+          <div className="loading"><div className="spinner" />Loading overdue tasks…</div>
+        ) : tasks.length === 0 ? (
+          <div className="empty-state">
+            <div className="empty-icon">✔</div>
+            <div className="empty-title">No overdue tasks</div>
+            <div className="empty-sub">Great work, everything is up to date.</div>
+          </div>
+        ) : (
+          <div className="tasks-list">
+            {tasks.map((task) => (
+              <TaskCard
+                key={task.id}
+                task={task}
+                onEdit={(t) => { setSelectedTask(t); setModal("editTask"); }}
+                onDelete={(t) => { setSelectedTask(t); setModal("deleteTask"); }}
+              />
+            ))}
+          </div>
+        )}
+      </div>
+
+      {modal === "editTask" && selectedTask && (
+        <TaskModal
+          task={selectedTask}
+          projectId={selectedTask.project}
+          onClose={() => { setModal(null); setSelectedTask(null); }}
+          onSave={handleTaskSave}
+        />
+      )}
+
+      {modal === "deleteTask" && selectedTask && (
+        <ConfirmModal
+          title="Delete Task"
+          message={`Are you sure you want to delete "${selectedTask.title}"? This cannot be undone.`}
+          onConfirm={handleTaskDelete}
+          onClose={() => { setModal(null); setSelectedTask(null); }}
+        />
+      )}
+    </>
+  );
+}
+
 // ─── ROOT APP ─────────────────────────────────────────────────────────────────
 export default function App() {
   const [projects, setProjects] = useState([]);
   const [activeProject, setActiveProject] = useState(null);
+  const [activeOverdue, setActiveOverdue] = useState(false);
   const [modal, setModal] = useState(null); // 'newProject' | 'editProject' | 'deleteProject'
   const [selectedProject, setSelectedProject] = useState(null);
   const [loadingProjects, setLoadingProjects] = useState(true);
@@ -736,8 +862,8 @@ export default function App() {
               projects.map((p) => (
                 <div
                   key={p.id}
-                  className={`project-item ${activeProject?.id === p.id ? "active" : ""}`}
-                  onClick={() => setActiveProject(p)}
+                  className={`project-item ${activeProject?.id === p.id && !activeOverdue ? "active" : ""}`}
+                  onClick={() => { setActiveProject(p); setActiveOverdue(false); }}
                 >
                   <div className="project-item-name">{p.name}</div>
                   <div className="project-item-meta">
@@ -754,12 +880,15 @@ export default function App() {
 
         {/* Main */}
         <main className="main">
-          {activeProject ? (
+          {activeOverdue ? (
+            <OverdueView />
+          ) : activeProject ? (
             <ProjectView
               key={activeProject.id}
               project={activeProject}
               onProjectEdit={(p) => { setSelectedProject(p); setModal("editProject"); }}
               onProjectDelete={(p) => { setSelectedProject(p); setModal("deleteProject"); }}
+              onSwitchToOverdue={() => { setActiveProject(null); setActiveOverdue(true); }}
             />
           ) : (
             <div className="welcome">

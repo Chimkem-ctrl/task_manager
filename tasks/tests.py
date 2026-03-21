@@ -1,6 +1,7 @@
 from django.urls import reverse
 from rest_framework.test import APITestCase
 from rest_framework import status
+from django.utils import timezone
 
 from .models import Project, Task
 
@@ -12,7 +13,8 @@ class TaskApiTests(APITestCase):
             project=self.project,
             title='Critical task',
             priority='critical',
-            status='todo'
+            status='todo',
+            deadline=timezone.now() - timezone.timedelta(days=1)
         )
         self.task_2 = Task.objects.create(
             project=self.project,
@@ -44,6 +46,21 @@ class TaskApiTests(APITestCase):
         response = self.client.get(url)
         self.assertEqual(response.status_code, status.HTTP_200_OK)
         self.assertEqual(response.data['count'], 0)
+
+    def test_overdue_endpoint_returns_overdue_tasks(self):
+        url = reverse('task-overdue')
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
+        self.assertEqual(response.data['results'][0]['priority'], 'critical')
+
+    def test_overdue_endpoint_filters_by_project(self):
+        other_project = Project.objects.create(name='Other', description='')
+        Task.objects.create(project=other_project, title='Other unresolved', priority='critical', status='todo', deadline=None)
+        url = reverse('task-overdue') + f'?project={self.project.id}'
+        response = self.client.get(url)
+        self.assertEqual(response.status_code, status.HTTP_200_OK)
+        self.assertEqual(response.data['count'], 1)
 
     def test_invalid_status_returns_bad_request_via_serializer(self):
         url = reverse('task-list')

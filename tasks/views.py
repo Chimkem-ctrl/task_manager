@@ -66,7 +66,13 @@ class TaskViewSet(viewsets.ModelViewSet):
             deadline__lt=timezone.now()
         ).exclude(
             status__in=[Task.Status.DONE, Task.Status.CANCELLED]
-        ).order_by('deadline')
+        )
+
+        project_id = request.query_params.get('project')
+        if project_id:
+            qs = qs.filter(project_id=project_id)
+
+        qs = qs.order_by('deadline')
         serializer = self.get_serializer(qs, many=True)
         return Response({'count': qs.count(), 'results': serializer.data})
 
