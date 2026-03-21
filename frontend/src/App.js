@@ -35,11 +35,29 @@ const api = {
       // Use dedicated overdue endpoint if overdue filter active
       if (params.overdue === "true") {
         delete params.overdue;
-        const q = new URLSearchParams({ project: id, ...params }).toString();
-        return request(`/tasks/overdue/?${q}`).then(res => res.tasks || res);
+        const q = new URLSearchParams();
+        q.append('project', id);
+        Object.keys(params).forEach(key => {
+          const val = params[key];
+          if (Array.isArray(val)) {
+            val.forEach(v => q.append(key, v));
+          } else {
+            q.append(key, val);
+          }
+        });
+        return request(`/tasks/overdue/?${q.toString()}`).then(res => res.results || res);
       }
-      const q = new URLSearchParams({ project: id, ...params }).toString();
-      return request(`/tasks/?${q}`);
+      const q = new URLSearchParams();
+      q.append('project', id);
+      Object.keys(params).forEach(key => {
+        const val = params[key];
+        if (Array.isArray(val)) {
+          val.forEach(v => q.append(key, v));
+        } else {
+          q.append(key, val);
+        }
+      });
+      return request(`/tasks/?${q.toString()}`);
     },
   },
   tasks: {
@@ -66,6 +84,13 @@ const STATUS_CONFIG = {
   in_progress: { label: "In Progress", color: "#5b9cf6" },
   done:        { label: "Done",        color: "#4cc9a4" },
   cancelled:   { label: "Cancelled",   color: "#d9534f" },
+};
+
+const DEADLINE_CONFIG = {
+  overdue: { label: "Overdue", color: "#ff3b5c", bg: "rgba(255,59,92,0.12)" },
+  today:   { label: "Due Today", color: "#f5c842", bg: "rgba(245,200,66,0.12)" },
+  week:    { label: "Due This Week", color: "#5b9cf6", bg: "rgba(91,156,246,0.12)" },
+  month:   { label: "Due This Month", color: "#4cc9a4", bg: "rgba(76,201,164,0.12)" },
 };
 
 // ─── HELPERS ─────────────────────────────────────────────────────────────────
@@ -480,7 +505,7 @@ function TaskCard({ task, onEdit, onDelete }) {
 function ProjectView({ project, onProjectEdit, onProjectDelete, onSwitchToOverdue }) {
   const [tasks, setTasks] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [filters, setFilters] = useState({ priority: "", status: "" });
+  const [filters, setFilters] = useState({ priorities: [], status: "", deadline_range: "" });
   const [modal, setModal] = useState(null); // null | 'newTask' | 'editTask' | 'deleteTask'
   const [selectedTask, setSelectedTask] = useState(null);
 
@@ -491,8 +516,9 @@ function ProjectView({ project, onProjectEdit, onProjectDelete, onSwitchToOverdu
     setFetchError("");
     try {
       const params = {};
-      if (filters.priority) params.priority = filters.priority;
+      if (filters.priorities.length > 0) params.priority = filters.priorities;
       if (filters.status) params.status = filters.status;
+      if (filters.deadline_range) params.deadline_range = filters.deadline_range;
       const data = await api.projects.tasks(project.id, params);
       console.log("[fetchTasks] response:", data);
       setTasks(Array.isArray(data) ? data : []);
@@ -534,7 +560,15 @@ function ProjectView({ project, onProjectEdit, onProjectDelete, onSwitchToOverdu
   const overdue = tasks.filter((t) => t.is_overdue).length;
   const inProgress = tasks.filter((t) => t.status === "in_progress").length;
 
-  const toggleFilter = (key, val) =>
+  const togglePriority = (val) =>
+    setFilters((prev) => ({
+      ...prev,
+      priorities: prev.priorities.includes(val)
+        ? prev.priorities.filter(p => p !== val)
+        : [...prev.priorities, val]
+    }));
+
+  const toggleSingle = (key, val) =>
     setFilters((prev) => ({ ...prev, [key]: prev[key] === val ? "" : val }));
 
   return (
@@ -579,9 +613,9 @@ function ProjectView({ project, onProjectEdit, onProjectDelete, onSwitchToOverdu
         {["low", "medium", "high", "critical"].map((p) => (
           <button
             key={p}
-            className={`filter-chip ${filters.priority === p ? "active" : ""}`}
-            onClick={() => toggleFilter("priority", p)}
-            style={filters.priority === p ? { borderColor: PRIORITY_CONFIG[p].color, color: PRIORITY_CONFIG[p].color, background: PRIORITY_CONFIG[p].bg } : {}}
+            className={`filter-chip ${filters.priorities.includes(p) ? "active" : ""}`}
+            onClick={() => togglePriority(p)}
+            style={filters.priorities.includes(p) ? { borderColor: PRIORITY_CONFIG[p].color, color: PRIORITY_CONFIG[p].color, background: PRIORITY_CONFIG[p].bg } : {}}
           >
             {PRIORITY_CONFIG[p].label}
           </button>
@@ -592,9 +626,21 @@ function ProjectView({ project, onProjectEdit, onProjectDelete, onSwitchToOverdu
           <button
             key={s}
             className={`filter-chip ${filters.status === s ? "active" : ""}`}
-            onClick={() => toggleFilter("status", s)}
+            onClick={() => toggleSingle("status", s)}
           >
             {STATUS_CONFIG[s].label}
+          </button>
+        ))}
+        <div className="filter-sep" />
+        <span className="filter-label">Deadline:</span>
+        {["overdue", "today", "week", "month"].map((d) => (
+          <button
+            key={d}
+            className={`filter-chip ${filters.deadline_range === d ? "active" : ""}`}
+            onClick={() => toggleSingle("deadline_range", d)}
+            style={filters.deadline_range === d ? { borderColor: DEADLINE_CONFIG[d].color, color: DEADLINE_CONFIG[d].color, background: DEADLINE_CONFIG[d].bg } : {}}
+          >
+            {DEADLINE_CONFIG[d].label}
           </button>
         ))}
         <div className="filter-sep" />

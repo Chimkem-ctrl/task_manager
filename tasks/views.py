@@ -31,18 +31,34 @@ class ProjectViewSet(viewsets.ModelViewSet):
         qs = project.tasks.all()
 
         status = request.query_params.get('status')
-        priority = request.query_params.get('priority')
+        priority = request.query_params.getlist('priority')  # Allow multiple
         overdue = request.query_params.get('overdue')
         ordering = request.query_params.get('ordering')
+        deadline_range = request.query_params.get('deadline_range')
 
         if status:
             qs = qs.filter(status=status)
         if priority:
-            qs = qs.filter(priority=priority)
+            qs = qs.filter(priority__in=priority)
         if overdue and overdue.lower() in ['true', '1', 'yes']:
             qs = qs.filter(deadline__lt=timezone.now()).exclude(
                 status__in=[Task.Status.DONE, Task.Status.CANCELLED]
             )
+        if deadline_range:
+            now = timezone.now()
+            if deadline_range == 'overdue':
+                qs = qs.filter(deadline__lt=now).exclude(
+                    status__in=[Task.Status.DONE, Task.Status.CANCELLED]
+                )
+            elif deadline_range == 'today':
+                today = now.date()
+                qs = qs.filter(deadline__date=today)
+            elif deadline_range == 'week':
+                from datetime import timedelta
+                week_end = now.date() + timedelta(days=7)
+                qs = qs.filter(deadline__date__range=[now.date(), week_end])
+            elif deadline_range == 'month':
+                qs = qs.filter(deadline__month=now.month, deadline__year=now.year)
         if ordering:
             qs = qs.order_by(ordering)
 
@@ -59,6 +75,26 @@ class TaskViewSet(viewsets.ModelViewSet):
     filterset_fields = ['status', 'priority', 'project']
     search_fields = ['title', 'description']
     ordering_fields = ['deadline', 'priority', 'created_at']
+
+    def get_queryset(self):
+        queryset = super().get_queryset()
+        deadline_range = self.request.query_params.get('deadline_range')
+        if deadline_range:
+            now = timezone.now()
+            if deadline_range == 'overdue':
+                queryset = queryset.filter(deadline__lt=now).exclude(
+                    status__in=[Task.Status.DONE, Task.Status.CANCELLED]
+                )
+            elif deadline_range == 'today':
+                today = now.date()
+                queryset = queryset.filter(deadline__date=today)
+            elif deadline_range == 'week':
+                from datetime import timedelta
+                week_end = now.date() + timedelta(days=7)
+                queryset = queryset.filter(deadline__date__range=[now.date(), week_end])
+            elif deadline_range == 'month':
+                queryset = queryset.filter(deadline__month=now.month, deadline__year=now.year)
+        return queryset
 
     @action(detail=False, methods=['get'], url_path='overdue')
     def overdue(self, request):
