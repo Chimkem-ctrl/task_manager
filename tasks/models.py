@@ -50,9 +50,7 @@ class Task(models.Model):
     @property
     def is_overdue(self):
         """Automatically returns True if deadline passed and task is not done."""
-        if self.deadline and self.status not in [
-            self.Status.DONE, 'done', self.Status.CANCELLED, 'cancelled'
-        ]:
+        if self.deadline and self.status not in [self.Status.DONE, self.Status.CANCELLED]:
             return timezone.now() > self.deadline
         return False
 
