@@ -60,8 +60,8 @@ class FlexibleDeadlineField(serializers.Field):
 class TaskSerializer(serializers.ModelSerializer):
     is_overdue = serializers.ReadOnlyField()
     deadline = FlexibleDeadlineField(required=False, allow_null=True, default=None)
-    priority = serializers.CharField(required=False, default='medium')
-    status = serializers.CharField(required=False, default='todo')
+    priority = serializers.ChoiceField(choices=VALID_PRIORITIES, required=False, default='medium')
+    status = serializers.ChoiceField(choices=VALID_STATUSES, required=False, default='todo')
 
     class Meta:
         model = Task
@@ -72,19 +72,17 @@ class TaskSerializer(serializers.ModelSerializer):
         ]
         read_only_fields = ['id', 'created_at', 'updated_at', 'is_overdue']
 
-    def validate_priority(self, value):
-        if value not in VALID_PRIORITIES:
-            raise serializers.ValidationError(
-                f'"{value}" is not valid. Options: {", ".join(VALID_PRIORITIES)}'
-            )
-        return value
+    def validate_title(self, value):
+        if not value or not value.strip():
+            raise serializers.ValidationError('Title cannot be empty.')
+        return value.strip()
 
-    def validate_status(self, value):
-        if value not in VALID_STATUSES:
-            raise serializers.ValidationError(
-                f'"{value}" is not valid. Options: {", ".join(VALID_STATUSES)}'
-            )
-        return value
+    def validate(self, data):
+        if 'title' in data:
+            data['title'] = data['title'].strip()
+        if 'description' in data:
+            data['description'] = data['description'].strip()
+        return data
 
 
 class ProjectSerializer(serializers.ModelSerializer):
@@ -100,7 +98,13 @@ class ProjectSerializer(serializers.ModelSerializer):
         return obj.tasks.count()
 
     def get_overdue_count(self, obj):
-        return sum(1 for t in obj.tasks.all() if t.is_overdue)
+        from django.db.models import Q
+        from django.utils import timezone
+        return obj.tasks.filter(
+            deadline__lt=timezone.now()
+        ).exclude(
+            Q(status=Task.Status.DONE) | Q(status=Task.Status.CANCELLED)
+        ).count()
 
 
 class ProjectDetailSerializer(ProjectSerializer):

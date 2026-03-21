@@ -41,7 +41,7 @@ class TaskViewSet(viewsets.ModelViewSet):
         qs = Task.objects.filter(
             deadline__lt=timezone.now()
         ).exclude(
-            status__in=['done', 'cancelled']
+            status__in=[Task.Status.DONE, Task.Status.CANCELLED]
         ).order_by('deadline')
         serializer = self.get_serializer(qs, many=True)
         return Response({'count': qs.count(), 'results': serializer.data})
@@ -52,6 +52,14 @@ class TaskViewSet(viewsets.ModelViewSet):
         if not date_str:
             return Response(
                 {'error': 'Provide ?date=YYYY-MM-DD'},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            from datetime import datetime
+            datetime.strptime(date_str, '%Y-%m-%d')
+        except ValueError:
+            return Response(
+                {'error': 'Invalid date format. Use YYYY-MM-DD'},
                 status=status.HTTP_400_BAD_REQUEST
             )
         qs = Task.objects.filter(

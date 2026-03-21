@@ -8,12 +8,14 @@ class Project(models.Model):
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
+    class Meta:
+        ordering = ['-created_at']
+
     def __str__(self):
         return self.name
 
 
 class Task(models.Model):
-
     class Priority(models.TextChoices):
         LOW = 'low', 'Low'
         MEDIUM = 'medium', 'Medium'
@@ -36,12 +38,14 @@ class Task(models.Model):
     priority = models.CharField(
         max_length=10,
         choices=Priority.choices,
-        default=Priority.MEDIUM
+        default=Priority.MEDIUM,
+        db_index=True
     )
     status = models.CharField(
         max_length=15,
         choices=Status.choices,
-        default=Status.TODO
+        default=Status.TODO,
+        db_index=True
     )
     deadline = models.DateTimeField(null=True, blank=True)
     created_at = models.DateTimeField(auto_now_add=True)
